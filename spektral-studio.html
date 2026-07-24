@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spektrál Stúdió — hang újraépítése generátorokkal</title>
+<style>
+:root{
+  --bg:#0d1014; --bg2:#141a21; --bg3:#1c242e; --line:#2a3543;
+  --fg:#e6edf3; --dim:#8b9bad; --acc:#4dd4c0; --acc2:#f0a33c; --red:#e2555b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:13px/1.45 system-ui,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
+h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.02em}
+h1 span{color:var(--acc)}
+button{background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font:inherit;cursor:pointer}
+button:hover:not(:disabled){background:#26313d;border-color:#3b4a5c}
+button:disabled{opacity:.4;cursor:default}
+button.pri{background:var(--acc);color:#06231f;border-color:transparent;font-weight:650}
+button.pri:hover:not(:disabled){background:#5fe6d1}
+button.on{background:var(--acc2);color:#2a1802;border-color:transparent;font-weight:650}
+button.tiny{padding:2px 7px;font-size:11px;border-radius:4px}
+select,input[type=number]{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font:inherit}
+input[type=range]{accent-color:var(--acc);height:16px}
+label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.bar{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(--bg2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.grp{display:flex;align-items:center;gap:6px}
+.sep{width:1px;height:22px;background:var(--line)}
+.spacer{flex:1}
+#drop{flex:1;min-width:180px;border:1px dashed var(--line);border-radius:7px;padding:6px 12px;text-align:center;color:var(--dim);cursor:pointer}
+#drop.hot{border-color:var(--acc);color:var(--acc);background:#4dd4c010}
+#prog{height:3px;background:var(--bg3)}
+#prog>i{display:block;height:100%;width:0;background:var(--acc);transition:width .12s}
+#msg{padding:4px 14px;font-size:11px;color:var(--dim);min-height:20px;background:var(--bg2);border-bottom:1px solid var(--line)}
+#ov{display:block;width:100%;height:64px;background:var(--bg2);border-bottom:1px solid var(--line);cursor:crosshair}
+#tracks{flex:1;overflow:auto}
+.row{display:flex;border-bottom:1px solid var(--line);background:var(--bg)}
+.row:nth-child(even){background:#0f1318}
+.ctl{width:290px;min-width:290px;padding:7px 9px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:5px}
+.ctl .top{display:flex;align-items:center;gap:6px}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+.nm{font-weight:600;font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.knobs{display:grid;grid-template-columns:auto 1fr auto;gap:2px 6px;align-items:center;font-size:10px;color:var(--dim)}
+.knobs input[type=range]{width:100%}
+.val{font-variant-numeric:tabular-nums;color:var(--fg);font-size:10px;min-width:34px;text-align:right}
+.more{display:none}
+.row.open .more{display:contents}
+.cv{flex:1;position:relative;min-width:0}
+.cv canvas{display:block;width:100%;height:86px;cursor:crosshair}
+.ph{position:absolute;top:0;bottom:0;width:1px;background:var(--acc2);pointer-events:none;left:0}
+#ph{position:absolute;top:0;bottom:0;width:1px;background:var(--acc2);pointer-events:none;left:0;display:none}
+#empty{padding:40px;text-align:center;color:var(--dim);line-height:1.9}
+kbd{background:var(--bg3);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>Spektrál <span>Stúdió</span></h1>
+  <div id="drop">Húzz ide hangfájlt, vagy kattints a tallózáshoz</div>
+  <input type="file" id="file" accept="audio/*" hidden>
+  <button id="demo">Demó hang</button>
+</div>
+
+<div class="bar">
+  <div class="grp"><label>Mód</label>
+    <select id="mode">
+      <option value="band">Frekvenciasávok</option>
+      <option value="inst">Hangszerkövetés</option>
+    </select>
+  </div>
+  <div class="grp"><label>Sávok</label><input type="number" id="nTracks" value="8" min="2" max="16" style="width:52px"></div>
+  <div class="grp"><label>Generátor / sáv</label><input type="number" id="nPeaks" value="5" min="1" max="12" style="width:52px"></div>
+  <div class="grp"><label>FFT</label>
+    <select id="fft"><option>1024</option><option selected>2048</option><option>4096</option></select>
+  </div>
+  <div class="grp"><label>Max hossz (s)</label><input type="number" id="maxLen" value="45" min="2" max="300" style="width:56px"></div>
+  <button class="pri" id="run" disabled>Elemzés + újraépítés</button>
+  <div class="spacer"></div>
+  <button id="expMix" disabled>WAV export</button>
+</div>
+
+<div class="bar">
+  <button class="pri" id="play" disabled>▶ Lejátszás</button>
+  <button id="ab" disabled>Eredeti A/B</button>
+  <button id="loop">Loop</button>
+  <div class="grp"><label>Master</label><input type="range" id="master" min="0" max="150" value="100" style="width:100px"></div>
+  <div class="grp" style="font-variant-numeric:tabular-nums"><span id="time">0:00</span> / <span id="dur">0:00</span></div>
+  <div class="spacer"></div>
+  <div class="grp"><label>Generátorok</label><b id="genCount">0</b></div>
+</div>
+
+<div id="prog"><i></i></div>
+<div id="msg">Tölts be egy hangfájlt. Az elemzés a böngészőben fut, semmi nem megy fel sehova.</div>
+<canvas id="ov"></canvas>
+<div id="tracks"><div id="empty">
+  A program FFT-vel felbontja a hangot, spektrális csúcsokat követ, és <b>szinusz-generátorokból + szűrt zajból</b> építi újra sávonként.<br>
+  <b>Frekvenciasávok</b> mód: logaritmikus sávokra vág. <b>Hangszerkövetés</b>: felharmonikus-csoportokat keres és hangszerenként külön sávba rakja.<br>
+  A sáv-idővonalra kattintva hangerő-automatizálást rajzolhatsz. <kbd>Alt</kbd>+kattintás töröl pontot. <kbd>Space</kbd> = lejátszás.
+</div></div>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s), clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const fmt=t=>{t=Math.max(0,t|0);return (t/60|0)+':'+String(t%60).padStart(2,'0')};
+const msg=t=>$('#msg').textContent=t;
+const setProg=p=>$('#prog>i').style.width=(p*100)+'%';
+/* Eseményhurok-átadás MessageChannel-lel: a setTimeout-ot a böngésző háttérben
+   futó fülön másodpercenként/percenként egyre fojtja, ez nincs fojtva. */
+const _mc=new MessageChannel(); let _res=null, _ly=0;
+_mc.port1.onmessage=()=>{const r=_res;_res=null;if(r)r()};
+const yield_=(force)=>{
+  const n=performance.now();
+  if(!force&&n-_ly<40) return Promise.resolve();
+  _ly=n;
+  return new Promise(r=>{_res=r;_mc.port2.postMessage(0)});
+};
+const TAU=Math.PI*2;
+
+/* ================= FFT ================= */
+class FFT{
+  constructor(n){
+    this.n=n; this.rev=new Uint32Array(n);
+    let bits=Math.log2(n)|0;
+    for(let i=0;i<n;i++){let x=i,r=0;for(let b=0;b<bits;b++){r=(r<<1)|(x&1);x>>=1}this.rev[i]=r}
+    this.cos=new Float64Array(n/2); this.sin=new Float64Array(n/2);
+    for(let i=0;i<n/2;i++){this.cos[i]=Math.cos(-TAU*i/n);this.sin[i]=Math.sin(-TAU*i/n)}
+  }
+  // in-place complex FFT
+  run(re,im){
+    const n=this.n,rev=this.rev;
+    for(let i=0;i<n;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t}}
+    for(let size=2;size<=n;size<<=1){
+      const half=size>>1, step=n/size;
+      for(let i=0;i<n;i+=size){
+        for(let j=i,k=0;j<i+half;j++,k+=step){
+          const c=this.cos[k],s=this.sin[k];
+          const tr=re[j+half]*c-im[j+half]*s, ti=re[j+half]*s+im[j+half]*c;
+          re[j+half]=re[j]-tr; im[j+half]=im[j]-ti;
+          re[j]+=tr; im[j]+=ti;
+        }
+      }
+    }
+  }
+}
+
+/* ================= állapot ================= */
+let ctx=null, A=null, srcBuf=null, playing=false, abOriginal=false;
+let startCtxTime=0, startOffset=0, nodes=[], masterGain=null, origSrc=null;
+const HARM=12;
+
+function audioCtx(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)(); return ctx; }
+
+/* ================= betöltés ================= */
+const drop=$('#drop');
+drop.onclick=()=>$('#file').click();
+$('#file').onchange=e=>{ if(e.target.files[0]) load(e.target.files[0]) };
+['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('hot')}));
+['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('hot')}));
+drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0]; if(f) load(f)});
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>e.preventDefault());
+
+async function load(file){
+  const c=audioCtx(); await c.resume();
+  msg('Dekódolás: '+file.name+' …');
+  try{
+    const ab=await file.arrayBuffer();
+    srcBuf=await c.decodeAudioData(ab);
+  }catch(err){ msg('Nem sikerült dekódolni: '+err.message); return }
+  drop.textContent=file.name+'  ·  '+fmt(srcBuf.duration)+'  ·  '+srcBuf.sampleRate+' Hz';
+  $('#run').disabled=false; $('#dur').textContent=fmt(srcBuf.duration);
+  A=null; renderTrackList(); drawOverview();
+  msg('Betöltve. Állítsd be a paramétereket, majd „Elemzés + újraépítés".');
+}
+
+$('#demo').onclick=async()=>{
+  const c=audioCtx(); await c.resume();
+  const sr=c.sampleRate, dur=8, n=sr*dur, b=c.createBuffer(1,n,sr), d=b.getChannelData(0);
+  const chord=[[130.81,0],[196.0,0],[261.63,2],[329.63,4],[392.0,4],[523.25,6]];
+  for(const [f,t0] of chord){
+    for(let i=Math.floor(t0*sr/2);i<n;i++){
+      const t=(i-t0*sr/2)/sr, env=Math.min(1,t*8)*Math.exp(-t*0.35);
+      for(let h=1;h<=6;h++){ const a=0.09*env/h; d[i]+=a*Math.sin(TAU*f*h*i/sr) }
+    }
+  }
+  for(let k=0;k*0.25<dur;k++){ // hi-hat + kick
+    const s0=Math.floor(k*0.25*sr);
+    for(let i=0;i<sr*0.09&&s0+i<n;i++) d[s0+i]+=(Math.random()*2-1)*0.22*Math.exp(-i/sr*55);
+    if(k%4===0) for(let i=0;i<sr*0.3&&s0+i<n;i++){ const t=i/sr; d[s0+i]+=0.55*Math.exp(-t*11)*Math.sin(TAU*(52+90*Math.exp(-t*22))*t) }
+  }
+  let m=0; for(let i=0;i<n;i++) m=Math.max(m,Math.abs(d[i]));
+  for(let i=0;i<n;i++) d[i]*=0.85/m;
+  srcBuf=b; drop.textContent='Demó: akkord + ütős  ·  '+fmt(dur);
+  $('#run').disabled=false; $('#dur').textContent=fmt(dur);
+  A=null; renderTrackList(); drawOverview(); msg('Demó hang készen. Próbáld ki mindkét móddal.');
+};
+
+/* ================= elemzés ================= */
+function hann(N){const w=new Float32Array(N);for(let i=0;i<N;i++)w[i]=0.5-0.5*Math.cos(TAU*i/N);return w}
+
+function medianWin(buf,len){
+  for(let i=1;i<len;i++){const v=buf[i];let j=i-1;while(j>=0&&buf[j]>v){buf[j+1]=buf[j];j--}buf[j+1]=v}
+  return buf[len>>1];
+}
+
+/* helper: log sávhatárok */
+function logEdges(fLo,fHi,n){const e=new Float64Array(n+1);for(let i=0;i<=n;i++)e[i]=fLo*Math.pow(fHi/fLo,i/n);return e}
+function binOf(f,N,sr){return f*N/sr}
+function freqOf(k,N,sr){return k*sr/N}
+</script>
+<script>
+/* =========================================================
+   A fenti blokk szándékosan rövid — az érdemi rész itt jön.
+   (Külön <script> tag, hogy a hosszú kód átláthatóbb legyen.)
+   ========================================================= */
+
+/* ---- csúcskeresés egy kereten, adott bin-tartományban ---- */
+function pickPeaks(magH,base,kLo,kHi,K,thr,N,sr){
+  const out=[];
+  for(let k=Math.max(kLo,1);k<kHi;k++){
+    const m=magH[base+k];
+    if(m<thr) continue;
+    if(m>magH[base+k-1]&&m>=magH[base+k+1]){
+      const a=magH[base+k-1],b=m,cc=magH[base+k+1];
+      const den=(a-2*b+cc);
+      const d=den!==0?0.5*(a-cc)/den:0;
+      const f=freqOf(k+clamp(d,-0.5,0.5),N,sr);
+      const amp=b-0.25*(a-cc)*d;
+      out.push({f,m:amp});
+    }
+  }
+  out.sort((x,y)=>y.m-x.m);
+  return out.slice(0,K);
+}
+
+/* ---- részhang-követés ---- */
+class Tracker{
+  constructor(N,sr){this.act=[];this.done=[];this.N=N;this.sr=sr}
+  feed(t,peaks){
+    const used=new Set();
+    for(const tr of this.act) tr.hit=false;
+    for(const p of peaks){
+      let best=null,bd=1e9;
+      for(let i=0;i<this.act.length;i++){
+        const tr=this.act[i]; if(tr.hit||used.has(i)) continue;
+        const d=Math.abs(Math.log2(p.f/tr.f));
+        if(d<bd){bd=d;best=i}
+      }
+      const tol=0.035; // ~ fél hangköz
+      if(best!==null&&bd<tol){
+        const tr=this.act[best]; tr.hit=true; used.add(best);
+        while(tr.t0+tr.f_.length<t){tr.f_.push(tr.f);tr.a_.push(0)} // rés kitöltése
+        tr.f_.push(p.f); tr.a_.push(p.m); tr.f=p.f; tr.last=t;
+      }else{
+        this.act.push({t0:t,f:p.f,last:t,f_:[p.f],a_:[p.m],hit:true});
+      }
+    }
+    for(let i=this.act.length-1;i>=0;i--){
+      if(t-this.act[i].last>2){this.close(this.act[i]);this.act.splice(i,1)}
+    }
+  }
+  close(tr){ if(tr.f_.length>=3) this.done.push(tr) }
+  finish(){ for(const tr of this.act) this.close(tr); this.act=[]; return this.done }
+}
+/* scale: |X| spektrum-magnitúdóból idő-tartománybeli amplitúdó (Hann-ablak: A = 4|X|/N) */
+function toPartial(tr,h,scale){
+  const L=tr.f_.length, s=scale||1;
+  const f=new Float32Array(L+2), a=new Float32Array(L+2);
+  f[0]=tr.f_[0]; a[0]=0; f[L+1]=tr.f_[L-1]; a[L+1]=0;
+  for(let i=0;i<L;i++){f[i+1]=tr.f_[i];a[i+1]=tr.a_[i]*s}
+  return {t0:tr.t0-1,f,a,h:h||1};
+}
+</script>
+<script>
+/* ================= sáv-építés ================= */
+async function buildBands(S){
+  const {sr,N,hop,bins,nFrames,magH,magP,gmax}=S;
+  const nB=clamp(+$('#nTracks').value,2,16), K=clamp(+$('#nPeaks').value,1,12);
+  const edges=logEdges(35,sr/2,nB);
+  const thr=gmax*Math.pow(10,-72/20);
+  const trackers=[],explained=[];
+  const kEdge=[];
+  for(let b=0;b<=nB;b++) kEdge.push(clamp(Math.round(binOf(edges[b],N,sr)),1,bins-2));
+  for(let b=0;b<nB;b++){trackers.push(new Tracker(N,sr));explained.push(new Float32Array(nFrames))}
+
+  msg('Csúcskövetés '+nB+' sávban …');
+  for(let t=0;t<nFrames;t++){
+    const base=t*bins;
+    for(let b=0;b<nB;b++){
+      const lo=kEdge[b],hi=Math.max(kEdge[b]+1,kEdge[b+1]);
+      const pk=pickPeaks(magH,base,lo,hi,K,thr,N,sr);
+      trackers[b].feed(t,pk);
+      let e=0; for(const p of pk) e+=3*p.m*p.m;
+      explained[b][t]=e;
+    }
+    if((t&127)===0){setProg(0.6+0.35*t/nFrames);await yield_()}
+  }
+
+  const cal=1/(0.375*N*N);
+  const tracks=[];
+  for(let b=0;b<nB;b++){
+    const parts=trackers[b].finish().map(tr=>toPartial(tr,1,4/N));
+    const env=new Float32Array(nFrames);
+    const lo=kEdge[b],hi=Math.max(kEdge[b]+1,kEdge[b+1]);
+    for(let t=0;t<nFrames;t++){
+      const base=t*bins; let eh=0,ep=0;
+      for(let k=lo;k<hi;k++){eh+=2*magH[base+k]*magH[base+k];ep+=2*magP[base+k]*magP[base+k]}
+      const res=Math.max(0,eh-explained[b][t]);
+      env[t]=Math.sqrt((res+ep)*cal);
+    }
+    tracks.push(mkTrack({
+      name:hzName(edges[b])+'–'+hzName(edges[b+1]),
+      type:'band', fLo:edges[b], fHi:edges[b+1],
+      partials:parts, noise:[{lo:edges[b],hi:edges[b+1],env}], hue:(b*37)%360
+    }));
+  }
+  return tracks;
+}
+function hzName(f){ return f>=1000 ? (f/1000).toFixed(f<10000?1:0)+'k' : Math.round(f)+'' }
+
+/* ================= hangszer-építés ================= */
+async function buildInstruments(S){
+  const {sr,N,hop,bins,nFrames,magH,magP,gmax}=S;
+  const nG=clamp(+$('#nTracks').value,2,16);
+  const kMin=Math.max(2,Math.round(binOf(55,N,sr))), kMax=Math.min(bins-4,Math.round(binOf(1400,N,sr)));
+  const thr=gmax*Math.pow(10,-72/20);
+  const score=new Float32Array(bins);
+  let streams=[], active=[];
+
+  msg('Alaphang-követés (HPS) …');
+  for(let t=0;t<nFrames;t++){
+    const base=t*bins;
+    // harmonikus szorzat-spektrum
+    for(let k=kMin;k<=kMax;k++){
+      let s=0;
+      for(let h=1;h<=5;h++){const kk=k*h; if(kk>=bins)break; s+=Math.log(1+magH[base+kk]/(gmax*1e-4+1e-12))}
+      score[k]=s;
+    }
+    // top jelöltek
+    const cand=[];
+    for(let k=kMin+1;k<kMax;k++) if(score[k]>score[k-1]&&score[k]>=score[k+1]) cand.push({k,s:score[k]});
+    cand.sort((a,b)=>b.s-a.s);
+    const chosen=[];
+    for(const c of cand){
+      if(chosen.length>=4) break;
+      if(chosen.some(o=>Math.abs(Math.log2(o.k/c.k))<0.08)) continue;
+      chosen.push(c);
+    }
+    const obs=[];
+    for(const c of chosen){
+      const f0=freqOf(c.k,N,sr);
+      const amps=new Float32Array(HARM); let tot=0,nH=0,cent=0;
+      for(let h=1;h<=HARM;h++){
+        const kc=Math.round(binOf(f0*h,N,sr)); if(kc>=bins-1) break;
+        let bm=0;
+        for(let d=-2;d<=2;d++){const kk=kc+d; if(kk<1||kk>=bins)continue; if(magH[base+kk]>bm)bm=magH[base+kk]}
+        const a=4*bm/N; amps[h-1]=a; tot+=a; cent+=h*a; if(bm>thr) nH++;
+      }
+      if(nH>=3&&tot>0){ obs.push({f0,amps,tot,cent:cent/tot}) }
+    }
+    // stream illesztés
+    for(const st of active) st.hit=false;
+    for(const o of obs){
+      let best=null,bd=1e9;
+      for(let i=0;i<active.length;i++){
+        const st=active[i]; if(st.hit) continue;
+        const d=Math.abs(Math.log2(o.f0/st.f0)); if(d<bd){bd=d;best=i}
+      }
+      if(best!==null&&bd<0.045){
+        const st=active[best]; st.hit=true;
+        while(st.t0+st.f_.length<t){st.f_.push(st.f0);st.A.push(new Float32Array(HARM))}
+        st.f_.push(o.f0); st.A.push(o.amps); st.f0=o.f0; st.last=t; st.cs+=o.cent; st.cn++;
+      }else{
+        active.push({t0:t,f0:o.f0,last:t,f_:[o.f0],A:[o.amps],cs:o.cent,cn:1});
+      }
+    }
+    for(let i=active.length-1;i>=0;i--) if(t-active[i].last>3){ if(active[i].f_.length>=5) streams.push(active[i]); active.splice(i,1) }
+    if((t&127)===0){setProg(0.6+0.3*t/nFrames);await yield_()}
+  }
+  for(const st of active) if(st.f_.length>=5) streams.push(st);
+
+  msg('Hangszercsoportok klaszterezése (' +streams.length+ ' hangfolyam) …');
+  const K=Math.min(nG,Math.max(1,streams.length));
+  const feats=streams.map(s=>{
+    const fs=Array.from(s.f_).sort((a,b)=>a-b);
+    const med=fs[fs.length>>1];
+    return [Math.log2(med), Math.log2(1+ s.cs/s.cn)];
+  });
+  const lab=kmeans(feats,K);
+
+  const groups=[]; for(let i=0;i<K;i++) groups.push([]);
+  streams.forEach((s,i)=>groups[lab[i]].push(s));
+
+  // magyarázott energia sávonként (a maradékhoz)
+  const nRB=8, rEdges=logEdges(35,sr/2,nRB);
+  const kRE=[]; for(let b=0;b<=nRB;b++) kRE.push(clamp(Math.round(binOf(rEdges[b],N,sr)),1,bins-2));
+  const expl=[]; for(let b=0;b<nRB;b++) expl.push(new Float32Array(nFrames));
+  for(const s of streams){
+    for(let i=0;i<s.f_.length;i++){
+      const t=s.t0+i; if(t>=nFrames)break;
+      for(let h=1;h<=HARM;h++){
+        const a=s.A[i][h-1]; if(!a)continue;
+        const f=s.f_[i]*h; let b=0; while(b<nRB-1&&rEdges[b+1]<f)b++;
+        const X=a*N/4; expl[b][t]+=3*X*X;
+      }
+    }
+  }
+  const cal=1/(0.375*N*N);
+  const tracks=[];
+  groups.forEach((g,i)=>{
+    if(!g.length) return;
+    const parts=[];
+    for(const s of g){
+      for(let h=1;h<=HARM;h++){
+        const L=s.f_.length; let any=false;
+        const f=new Float32Array(L+2), a=new Float32Array(L+2);
+        for(let j=0;j<L;j++){f[j+1]=s.f_[j]*h;a[j+1]=s.A[j][h-1];if(a[j+1]>0)any=true}
+        if(!any) continue;
+        f[0]=f[1];f[L+1]=f[L];
+        parts.push({t0:s.t0-1,f,a,h});
+      }
+    }
+    const fs=g.map(s=>{const x=Array.from(s.f_).sort((p,q)=>p-q);return x[x.length>>1]}).sort((p,q)=>p-q);
+    const med=fs[fs.length>>1];
+    tracks.push(mkTrack({name:instName(med)+' ('+Math.round(med)+' Hz · '+g.length+' hang)',type:'inst',
+      fLo:40,fHi:S.sr/2,partials:parts,noise:[],hue:(i*53+20)%360}));
+  });
+
+  // maradék zaj sáv
+  const rnoise=[];
+  for(let b=0;b<nRB;b++){
+    const env=new Float32Array(nFrames), lo=kRE[b],hi=Math.max(kRE[b]+1,kRE[b+1]);
+    for(let t=0;t<nFrames;t++){
+      const base=t*bins; let eh=0;
+      for(let k=lo;k<hi;k++) eh+=2*magH[base+k]*magH[base+k];
+      env[t]=Math.sqrt(Math.max(0,eh-expl[b][t])*cal);
+    }
+    rnoise.push({lo:rEdges[b],hi:rEdges[b+1],env});
+  }
+  tracks.push(mkTrack({name:'Maradék / zajréteg',type:'res',fLo:40,fHi:S.sr/2,partials:[],noise:rnoise,hue:210}));
+
+  // ütős sáv
+  const pnoise=[], nPB=6, pEdges=logEdges(45,sr/2,nPB);
+  for(let b=0;b<nPB;b++){
+    const lo=clamp(Math.round(binOf(pEdges[b],N,sr)),1,bins-2), hi=clamp(Math.round(binOf(pEdges[b+1],N,sr)),lo+1,bins-1);
+    const env=new Float32Array(nFrames);
+    for(let t=0;t<nFrames;t++){
+      const base=t*bins; let e=0;
+      for(let k=lo;k<hi;k++) e+=2*magP[base+k]*magP[base+k];
+      env[t]=Math.sqrt(e*cal);
+    }
+    pnoise.push({lo:pEdges[b],hi:pEdges[b+1],env});
+  }
+  tracks.push(mkTrack({name:'Ütős / tranziens',type:'perc',fLo:45,fHi:S.sr/2,partials:[],noise:pnoise,hue:15}));
+  return tracks;
+}
+function instName(f){
+  if(f<95) return 'Mély basszus';
+  if(f<160) return 'Basszus';
+  if(f<260) return 'Alsó közép';
+  if(f<420) return 'Ének / közép';
+  if(f<700) return 'Felső közép';
+  return 'Magas / lead';
+}
+function kmeans(X,K){
+  const n=X.length; if(!n) return [];
+  const d=X[0].length, mu=[],sd=[];
+  for(let j=0;j<d;j++){let m=0;for(const x of X)m+=x[j];m/=n;let v=0;for(const x of X)v+=(x[j]-m)**2;v=Math.sqrt(v/n)||1;mu.push(m);sd.push(v)}
+  const Z=X.map(x=>x.map((v,j)=>(v-mu[j])/sd[j]));
+  const order=Z.map((z,i)=>i).sort((a,b)=>Z[a][0]-Z[b][0]);
+  const C=[]; for(let i=0;i<K;i++) C.push(Z[order[Math.floor((i+0.5)*n/K)]].slice());
+  const lab=new Int32Array(n);
+  for(let it=0;it<25;it++){
+    for(let i=0;i<n;i++){let bi=0,bd=1e18;for(let c=0;c<K;c++){let s=0;for(let j=0;j<d;j++)s+=(Z[i][j]-C[c][j])**2;if(s<bd){bd=s;bi=c}}lab[i]=bi}
+    const sum=[],cnt=new Int32Array(K);
+    for(let c=0;c<K;c++)sum.push(new Float64Array(d));
+    for(let i=0;i<n;i++){cnt[lab[i]]++;for(let j=0;j<d;j++)sum[lab[i]][j]+=Z[i][j]}
+    for(let c=0;c<K;c++) if(cnt[c]) for(let j=0;j<d;j++) C[c][j]=sum[c][j]/cnt[c];
+  }
+  return lab;
+}
+
+function mkTrack(o){
+  return Object.assign({
+    id:Math.random().toString(36).slice(2),
+    buffer:null, dirty:true, env:[{t:0,v:1},{t:1,v:1}],
+    p:{gain:1,pan:0,mute:false,solo:false,semi:0,tone:1,noise:1,spread:0,drive:1,quant:false}
+  },o);
+}
+</script>
+<script>
+/* ================= szintézis ================= */
+function renderTrack(T,S){
+  const {sr,hop,N,nFrames}=S, len=S.total;
+  const out=new Float32Array(len), half=N>>1;
+  const pitch=Math.pow(2,T.p.semi/12), amp=T.p.tone, q=T.p.quant;
+  const spread=T.p.spread; // cent
+  const voices = spread>0 ? [-1,0,1] : [0];
+  const vg = 1/voices.length;
+
+  if(amp>0) for(const P of T.partials){
+    const L=P.f.length;
+    for(const vo of voices){
+      const det=Math.pow(2,vo*spread/1200);
+      let ph=Math.random()*TAU;
+      for(let i=0;i<L-1;i++){
+        let n0=(P.t0+i)*hop+half, n1=(P.t0+i+1)*hop+half;
+        if(n1<=0||n0>=len) continue;
+        let f0=P.f[i],f1=P.f[i+1];
+        if(q&&P.h){ f0=snap(f0/P.h)*P.h; f1=snap(f1/P.h)*P.h }
+        f0*=pitch*det; f1*=pitch*det;
+        const a0=P.a[i]*amp*vg, a1=P.a[i+1]*amp*vg;
+        const s0=Math.max(0,n0), s1=Math.min(len,n1), span=n1-n0;
+        for(let n=s0;n<s1;n++){
+          const u=(n-n0)/span;
+          ph+=TAU*(f0+(f1-f0)*u)/sr;
+          out[n]+=(a0+(a1-a0)*u)*Math.sin(ph);
+        }
+      }
+    }
+  }
+
+  if(T.p.noise>0) for(const nb of T.noise){
+    let e=0; for(let t=0;t<nFrames;t++) e=Math.max(e,nb.env[t]);
+    if(e<=0) continue;
+    const nz=new Float32Array(len);
+    for(let i=0;i<len;i++) nz[i]=Math.random()*2-1;
+    const fc=Math.sqrt(Math.max(20,nb.lo*pitch)*Math.min(sr/2*0.98,nb.hi*pitch));
+    const bw=Math.max(20,nb.hi*pitch-nb.lo*pitch);
+    biquadBP(nz,sr,Math.min(fc,sr*0.47),Math.max(0.5,fc/bw));
+    biquadBP(nz,sr,Math.min(fc,sr*0.47),Math.max(0.5,fc/bw));
+    let rms=0; for(let i=0;i<len;i++) rms+=nz[i]*nz[i];
+    rms=Math.sqrt(rms/len)||1;
+    const g=T.p.noise/rms;
+    for(let n=0;n<len;n++){
+      const ft=(n-half)/hop, i0=clamp(Math.floor(ft),0,nFrames-1), i1=clamp(i0+1,0,nFrames-1);
+      const u=clamp(ft-i0,0,1);
+      out[n]+=nz[n]*g*(nb.env[i0]+(nb.env[i1]-nb.env[i0])*u);
+    }
+  }
+
+  const d=T.p.drive;
+  if(d>1.001){ const k=Math.tanh(d); for(let i=0;i<len;i++) out[i]=Math.tanh(out[i]*d)/k }
+  return out;
+}
+function snap(f){ return f>0 ? 440*Math.pow(2,Math.round(12*Math.log2(f/440))/12) : f }
+function biquadBP(x,sr,fc,Q){
+  const w0=TAU*fc/sr, al=Math.sin(w0)/(2*Q), cw=Math.cos(w0);
+  const a0=1+al, b0=al/a0, b1=0, b2=-al/a0, a1=-2*cw/a0, a2=(1-al)/a0;
+  let x1=0,x2=0,y1=0,y2=0;
+  for(let i=0;i<x.length;i++){
+    const xn=x[i], yn=b0*xn+b1*x1+b2*x2-a1*y1-a2*y2;
+    x2=x1;x1=xn;y2=y1;y1=yn;x[i]=yn;
+  }
+}
+</script>
+<script>
+/* ================= futtatás ================= */
+$('#run').onclick=async()=>{
+  if(!srcBuf) return;
+  $('#run').disabled=true; stop();
+  try{ await runAnalysis() }
+  catch(e){ console.error(e); msg('Hiba az elemzés közben: '+e.message) }
+  $('#run').disabled=false; setProg(0);
+};
+
+async function runAnalysis(){
+  const sr=srcBuf.sampleRate;
+  const maxLen=clamp(+$('#maxLen').value,2,300);
+  const total=Math.min(srcBuf.length,Math.floor(maxLen*sr));
+  const mono=new Float32Array(total);
+  for(let ch=0;ch<srcBuf.numberOfChannels;ch++){const d=srcBuf.getChannelData(ch);for(let i=0;i<total;i++)mono[i]+=d[i]/srcBuf.numberOfChannels}
+
+  const N=+$('#fft').value, hop=N>>2, half=N>>1, bins=half+1;
+  const nFrames=Math.max(1,Math.floor((total-N)/hop)+1);
+  const win=hann(N), fft=new FFT(N);
+  const mag=new Float32Array(nFrames*bins);
+  const re=new Float64Array(N), im=new Float64Array(N);
+
+  msg('STFT — '+nFrames+' keret × '+bins+' bin …');
+  let gmax=1e-12;
+  for(let t=0;t<nFrames;t++){
+    const off=t*hop;
+    for(let i=0;i<N;i++){re[i]=mono[off+i]*win[i];im[i]=0}
+    fft.run(re,im);
+    const base=t*bins;
+    for(let k=0;k<bins;k++){const m=Math.hypot(re[k],im[k]);mag[base+k]=m;if(m>gmax)gmax=m}
+    if((t&127)===0){setProg(0.3*t/nFrames);await yield_()}
+  }
+
+  msg('Harmonikus / ütős szétválasztás (HPSS) …');
+  const LT=17,LF=17;
+  const mh=new Float32Array(nFrames*bins), mp=new Float32Array(nFrames*bins);
+  const col=new Float32Array(nFrames), wb=new Float32Array(Math.max(LT,LF));
+  for(let k=0;k<bins;k++){
+    for(let t=0;t<nFrames;t++) col[t]=mag[t*bins+k];
+    for(let t=0;t<nFrames;t++){
+      for(let j=0;j<LT;j++) wb[j]=col[clamp(t+j-(LT>>1),0,nFrames-1)];
+      mh[t*bins+k]=medianWin(wb,LT);
+    }
+    if((k&63)===0){setProg(0.3+0.15*k/bins);await yield_()}
+  }
+  for(let t=0;t<nFrames;t++){
+    const base=t*bins;
+    for(let k=0;k<bins;k++){
+      for(let j=0;j<LF;j++) wb[j]=mag[base+clamp(k+j-(LF>>1),0,bins-1)];
+      mp[base+k]=medianWin(wb,LF);
+    }
+    if((t&127)===0){setProg(0.45+0.15*t/nFrames);await yield_()}
+  }
+  for(let i=0;i<mag.length;i++){
+    const h=mh[i]*mh[i], p=mp[i]*mp[i], s=h+p+1e-20, wH=h/s;
+    mh[i]=mag[i]*wH; mp[i]=mag[i]*(1-wH);
+  }
+
+  const S={sr,N,hop,bins,nFrames,mono,total,magH:mh,magP:mp,gmax,dur:total/sr,mode:$('#mode').value};
+  S.tracks = S.mode==='band' ? await buildBands(S) : await buildInstruments(S);
+  A=S;
+
+  // renderelés
+  msg('Generátorok renderelése …');
+  let gen=0;
+  const mix=new Float32Array(total);
+  for(let i=0;i<A.tracks.length;i++){
+    const T=A.tracks[i];
+    const d=renderTrack(T,A); T.data=d; T.dirty=false; gen+=T.partials.length+T.noise.length;
+    for(let n=0;n<total;n++) mix[n]+=d[n];
+    setProg(0.95+0.05*i/A.tracks.length); await yield_();
+  }
+  let ro=0,rm=0;
+  for(let n=0;n<total;n++){ro+=mono[n]*mono[n];rm+=mix[n]*mix[n]}
+  A.calib=clamp(Math.sqrt((ro||1)/(rm||1)),0.2,5);
+  for(const T of A.tracks) T.buffer=toBuffer(T.data,sr);
+
+  $('#genCount').textContent=gen;
+  $('#play').disabled=false; $('#ab').disabled=false; $('#expMix').disabled=false;
+  $('#dur').textContent=fmt(A.dur);
+  renderTrackList(); drawOverview();
+  msg('Kész: '+A.tracks.length+' sáv, '+gen+' generátor. Kalibráció ×'+A.calib.toFixed(2)+'. Játszd le és tekerj bele!');
+}
+
+function toBuffer(d,sr){
+  const b=audioCtx().createBuffer(1,d.length,sr);
+  b.copyToChannel(d,0); return b;
+}
+function reRender(T){
+  if(!A) return;
+  T.data=renderTrack(T,A); T.buffer=toBuffer(T.data,A.sr); T.dirty=false;
+  if(playing){ const pos=curTime(); stop(); play(pos) }
+}
+let reTimer=null, rePending=new Set();
+function scheduleRender(T){
+  T.dirty=true; rePending.add(T);
+  clearTimeout(reTimer);
+  reTimer=setTimeout(()=>{ msg('Újrarenderelés …'); setTimeout(()=>{ for(const t of rePending) reRender(t); rePending.clear(); msg('Kész.') },10) },200);
+}
+</script>
+<script>
+/* ================= lejátszás ================= */
+function anySolo(){ return A && A.tracks.some(t=>t.p.solo) }
+function effGain(T){ return T.p.mute||(anySolo()&&!T.p.solo) ? 0 : T.p.gain }
+function envAt(T,x){
+  const e=T.env; if(!e.length) return 1;
+  if(x<=e[0].t) return e[0].v;
+  for(let i=1;i<e.length;i++) if(x<=e[i].t){const u=(x-e[i-1].t)/(e[i].t-e[i-1].t||1);return e[i-1].v+(e[i].v-e[i-1].v)*u}
+  return e[e.length-1].v;
+}
+function curTime(){
+  if(!A) return 0;
+  const d=abOriginal?srcBuf.duration:A.dur;
+  if(!playing) return clamp(startOffset,0,d);
+  let t=startOffset+(audioCtx().currentTime-startCtxTime);
+  if($('#loop').classList.contains('on')&&t>d) t=t%d;
+  return clamp(t,0,d);
+}
+function stop(){
+  for(const n of nodes){ try{n.src.stop()}catch(e){} }
+  nodes=[]; if(origSrc){try{origSrc.stop()}catch(e){} origSrc=null}
+  playing=false; $('#play').textContent='▶ Lejátszás';
+}
+function play(offset){
+  const c=audioCtx(); c.resume(); stop();
+  const t0=c.currentTime+0.05;
+  startCtxTime=t0; startOffset=offset||0; playing=true;
+  masterGain=c.createGain(); masterGain.gain.value=(+$('#master').value/100)*(A?A.calib:1);
+  masterGain.connect(c.destination);
+  const loop=$('#loop').classList.contains('on');
+
+  if(abOriginal){
+    masterGain.gain.value=+$('#master').value/100;
+    origSrc=c.createBufferSource(); origSrc.buffer=srcBuf; origSrc.loop=loop;
+    origSrc.connect(masterGain); origSrc.start(t0,startOffset);
+    $('#play').textContent='■ Stop'; return;
+  }
+  const dur=A.dur, rem=Math.max(0.02,dur-startOffset);
+  for(const T of A.tracks){
+    const src=c.createBufferSource(); src.buffer=T.buffer; src.loop=loop;
+    const eg=c.createGain(), cg=c.createGain(), pan=c.createStereoPanner();
+    const M=256, curve=new Float32Array(M);
+    for(let i=0;i<M;i++) curve[i]=Math.max(0.0001,envAt(T,(startOffset+rem*i/(M-1))/dur));
+    try{ eg.gain.setValueCurveAtTime(curve,t0,rem) }catch(e){ eg.gain.value=curve[0] }
+    cg.gain.value=effGain(T); pan.pan.value=T.p.pan;
+    src.connect(eg).connect(cg).connect(pan).connect(masterGain);
+    src.start(t0,startOffset);
+    nodes.push({src,eg,cg,pan,T});
+  }
+  $('#play').textContent='■ Stop';
+}
+$('#play').onclick=()=>{ playing?stop():play(curTime()>=(abOriginal?srcBuf.duration:A.dur)-0.05?0:curTime()) };
+$('#loop').onclick=e=>e.target.classList.toggle('on');
+$('#ab').onclick=e=>{ abOriginal=!abOriginal; e.target.classList.toggle('on',abOriginal); const p=curTime(); if(playing){stop();play(p)} msg(abOriginal?'EREDETI szól.':'Az újraépített (generátoros) verzió szól.') };
+$('#master').oninput=e=>{ if(masterGain) masterGain.gain.value=(+e.target.value/100)*((A&&!abOriginal)?A.calib:1) };
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'&&!/INPUT|SELECT/.test(e.target.tagName)){ e.preventDefault(); if(!$('#play').disabled) $('#play').click() }
+});
+function updateGains(){ for(const n of nodes){ n.cg.gain.value=effGain(n.T); n.pan.pan.value=n.T.p.pan } }
+</script>
+<script>
+/* ================= UI: sávlista + rajzolás ================= */
+function renderTrackList(){
+  const host=$('#tracks'); host.innerHTML='';
+  if(!A){ host.innerHTML='<div id="empty">Nincs elemzés. Tölts be hangot és nyomj az „Elemzés + újraépítés" gombra.</div>'; return }
+  A.tracks.forEach((T,i)=>{
+    const row=document.createElement('div'); row.className='row';
+    const col=T.hue;
+    row.innerHTML=`
+      <div class="ctl">
+        <div class="top">
+          <span class="dot" style="background:hsl(${col} 70% 55%)"></span>
+          <span class="nm" title="${T.name}">${T.name}</span>
+          <button class="tiny" data-a="mute">M</button>
+          <button class="tiny" data-a="solo">S</button>
+          <button class="tiny" data-a="more">▾</button>
+        </div>
+        <div class="knobs">
+          <span>Vol</span><input type="range" data-k="gain" min="0" max="200" value="${T.p.gain*100}"><span class="val">${(T.p.gain*100)|0}</span>
+          <span>Pan</span><input type="range" data-k="pan" min="-100" max="100" value="${T.p.pan*100}"><span class="val">${(T.p.pan*100)|0}</span>
+          <span>Hang±</span><input type="range" data-k="semi" min="-24" max="24" step="1" value="${T.p.semi}"><span class="val">${T.p.semi}</span>
+          <div class="more"><span>Tónus</span><input type="range" data-k="tone" min="0" max="200" value="${T.p.tone*100}"><span class="val">${(T.p.tone*100)|0}</span>
+          <span>Zaj</span><input type="range" data-k="noise" min="0" max="200" value="${T.p.noise*100}"><span class="val">${(T.p.noise*100)|0}</span>
+          <span>Kórus</span><input type="range" data-k="spread" min="0" max="50" value="${T.p.spread}"><span class="val">${T.p.spread}</span>
+          <span>Torzít</span><input type="range" data-k="drive" min="10" max="120" value="${T.p.drive*10}"><span class="val">${T.p.drive.toFixed(1)}</span>
+          <span>Rács</span><span style="grid-column:span 2"><button class="tiny" data-a="quant">hangolás félhangrácsra: ki</button>
+          <button class="tiny" data-a="rese">env reset</button>
+          <button class="tiny" data-a="exp">export</button></span></div>
+        </div>
+      </div>
+      <div class="cv"><canvas></canvas><div class="ph"></div></div>`;
+    host.appendChild(row);
+    const cv=row.querySelector('canvas');
+
+    row.querySelectorAll('input[type=range]').forEach(inp=>{
+      inp.oninput=()=>{
+        const k=inp.dataset.k; let v=+inp.value;
+        const out=inp.nextElementSibling;
+        if(k==='gain'||k==='tone'||k==='noise'){T.p[k]=v/100;out.textContent=v|0}
+        else if(k==='pan'){T.p.pan=v/100;out.textContent=v|0}
+        else if(k==='semi'){T.p.semi=v;out.textContent=v}
+        else if(k==='spread'){T.p.spread=v;out.textContent=v}
+        else if(k==='drive'){T.p.drive=v/10;out.textContent=(v/10).toFixed(1)}
+        if(k==='gain'||k==='pan') updateGains(); else scheduleRender(T);
+      };
+    });
+    row.querySelectorAll('button[data-a]').forEach(b=>{
+      b.onclick=()=>{
+        const a=b.dataset.a;
+        if(a==='mute'){T.p.mute=!T.p.mute;b.classList.toggle('on',T.p.mute);updateGains()}
+        else if(a==='solo'){T.p.solo=!T.p.solo;b.classList.toggle('on',T.p.solo);updateGains()}
+        else if(a==='more'){row.classList.toggle('open');b.textContent=row.classList.contains('open')?'▴':'▾';setTimeout(()=>drawTrack(cv,T),0)}
+        else if(a==='quant'){T.p.quant=!T.p.quant;b.classList.toggle('on',T.p.quant);b.textContent='hangolás félhangrácsra: '+(T.p.quant?'be':'ki');scheduleRender(T)}
+        else if(a==='rese'){T.env=[{t:0,v:1},{t:1,v:1}];drawTrack(cv,T);if(playing){const p=curTime();stop();play(p)}}
+        else if(a==='exp') exportTrack(T);
+      };
+    });
+    setupEnvEdit(cv,T);
+    T._cv=cv; T._ph=row.querySelector('.ph');
+    drawTrack(cv,T);
+  });
+}
+
+function fitCanvas(cv,h){
+  const dpr=devicePixelRatio||1, w=cv.parentElement.clientWidth||600;
+  const hh=h||cv.parentElement.clientHeight||80;
+  cv.width=w*dpr; cv.height=hh*dpr; cv.style.height=hh+'px';
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); return {g,w,h:hh};
+}
+function drawTrack(cv,T){
+  if(!cv||!A) return;
+  const {g,w,h}=fitCanvas(cv,86);
+  g.clearRect(0,0,w,h);
+  g.fillStyle='#0b0e12'; g.fillRect(0,0,w,h);
+  const nF=A.nFrames, fLo=Math.max(30,T.fLo), fHi=Math.min(A.sr/2,T.fHi);
+  const yOf=f=>h-4-(h-8)*clamp(Math.log2(clamp(f,fLo,fHi)/fLo)/Math.log2(fHi/fLo),0,1);
+
+  // zajréteg háttér
+  for(const nb of T.noise){
+    let mx=1e-9; for(let t=0;t<nF;t++) mx=Math.max(mx,nb.env[t]);
+    g.beginPath();
+    for(let x=0;x<w;x++){ const t=Math.min(nF-1,Math.floor(x/w*nF)); const v=nb.env[t]/mx; g.lineTo(x, h-v*h*0.9) }
+    g.lineTo(w,h); g.lineTo(0,h); g.closePath();
+    g.fillStyle=`hsl(${T.hue} 40% 45% / .13)`; g.fill();
+  }
+  // részhangok
+  g.lineWidth=1.1;
+  let mxA=1e-9; for(const P of T.partials) for(let i=0;i<P.a.length;i++) if(P.a[i]>mxA) mxA=P.a[i];
+  for(const P of T.partials){
+    for(let i=0;i<P.f.length-1;i++){
+      const a=(P.a[i]+P.a[i+1])/2; if(a<=0) continue;
+      const x0=(P.t0+i)/nF*w, x1=(P.t0+i+1)/nF*w;
+      const l=25+55*Math.pow(a/mxA,0.35);
+      g.strokeStyle=`hsl(${T.hue} 85% ${l}% / ${0.25+0.75*Math.pow(a/mxA,0.4)})`;
+      g.beginPath(); g.moveTo(x0,yOf(P.f[i])); g.lineTo(x1,yOf(P.f[i+1])); g.stroke();
+    }
+  }
+  // burkológörbe
+  g.strokeStyle='#f0a33c'; g.lineWidth=1.6; g.beginPath();
+  for(let x=0;x<=w;x++){ const v=envAt(T,x/w); g.lineTo(x,h-v/2*h) }
+  g.stroke();
+  g.fillStyle='#f0a33c';
+  for(const p of T.env){ g.beginPath(); g.arc(p.t*w,h-p.v/2*h,3.4,0,TAU); g.fill() }
+  if(T.p.mute||(anySolo()&&!T.p.solo)){ g.fillStyle='#0009'; g.fillRect(0,0,w,h) }
+}
+function setupEnvEdit(cv,T){
+  let drag=-1;
+  const pos=e=>{const r=cv.getBoundingClientRect();return {x:clamp((e.clientX-r.left)/r.width,0,1),v:clamp((1-(e.clientY-r.top)/r.height)*2,0,2)}};
+  cv.onpointerdown=e=>{
+    const {x,v}=pos(e);
+    let hit=-1,bd=1e9;
+    T.env.forEach((p,i)=>{const d=Math.abs(p.t-x);if(d<bd){bd=d;hit=i}});
+    if(e.altKey){ if(bd<0.02&&T.env.length>2){T.env.splice(hit,1);drawTrack(cv,T);applyEnv(T)} return }
+    if(bd<0.02){ drag=hit } else { T.env.push({t:x,v}); T.env.sort((a,b)=>a.t-b.t); drag=T.env.findIndex(p=>p.t===x) }
+    cv.setPointerCapture(e.pointerId); drawTrack(cv,T);
+  };
+  cv.onpointermove=e=>{ if(drag<0)return; const {x,v}=pos(e); T.env[drag].t=x; T.env[drag].v=v; T.env.sort((a,b)=>a.t-b.t); drag=T.env.findIndex(p=>p.t===x&&p.v===v); drawTrack(cv,T) };
+  cv.onpointerup=()=>{ if(drag<0)return; drag=-1; applyEnv(T) };
+}
+function applyEnv(T){ if(playing){ const p=curTime(); stop(); play(p) } }
+
+/* áttekintő hullámforma */
+function drawOverview(){
+  const cv=$('#ov'); const {g,w,h}=fitCanvas(cv,64);
+  g.clearRect(0,0,w,h); g.fillStyle='#141a21'; g.fillRect(0,0,w,h);
+  if(!srcBuf) return;
+  const d=srcBuf.getChannelData(0), n=d.length;
+  g.fillStyle='#4dd4c055';
+  for(let x=0;x<w;x++){
+    const i0=Math.floor(x/w*n), i1=Math.floor((x+1)/w*n);
+    let mn=0,mx=0; for(let i=i0;i<i1;i+=Math.max(1,(i1-i0)>>6|0)){ if(d[i]<mn)mn=d[i]; if(d[i]>mx)mx=d[i] }
+    g.fillRect(x,h/2-mx*h/2,1,Math.max(1,(mx-mn)*h/2));
+  }
+  if(A&&A.dur<srcBuf.duration){ const x=A.dur/srcBuf.duration*w; g.fillStyle='#000a'; g.fillRect(x,0,w-x,h); g.fillStyle='#e2555b'; g.fillRect(x,0,1,h) }
+}
+$('#ov').onclick=e=>{
+  if(!srcBuf) return;
+  const r=e.target.getBoundingClientRect(), x=(e.clientX-r.left)/r.width;
+  const t=x*srcBuf.duration;
+  if(playing) play(t); else { startOffset=t; $('#time').textContent=fmt(t) }
+  drawPlayhead();
+};
+addEventListener('resize',()=>{ drawOverview(); if(A) for(const T of A.tracks) drawTrack(T._cv,T) });
+
+/* playhead animáció */
+const ovPh=document.createElement('div'); ovPh.id='ph'; ovPh.style.position='absolute';
+function drawPlayhead(){
+  const t=curTime();
+  $('#time').textContent=fmt(t);
+  if(A) for(const T of A.tracks){ if(!T._ph) continue;
+    T._ph.style.cssText='position:absolute;top:0;bottom:0;width:1px;background:#f0a33c;left:'+(t/A.dur*100)+'%';
+  }
+}
+(function tick(){ if(playing) drawPlayhead(); requestAnimationFrame(tick) })();
+</script>
+<script>
+/* ================= export ================= */
+function mixdown(){
+  const len=A.total, L=new Float32Array(len), R=new Float32Array(len), solo=anySolo();
+  for(const T of A.tracks){
+    const g0=(T.p.mute||(solo&&!T.p.solo))?0:T.p.gain;
+    if(g0<=0) continue;
+    const pl=Math.cos((T.p.pan+1)*Math.PI/4), pr=Math.sin((T.p.pan+1)*Math.PI/4);
+    for(let n=0;n<len;n++){
+      const v=T.data[n]*g0*envAt(T,n/len)*A.calib;
+      L[n]+=v*pl*1.414; R[n]+=v*pr*1.414;
+    }
+  }
+  let pk=1e-9; for(let n=0;n<len;n++){pk=Math.max(pk,Math.abs(L[n]),Math.abs(R[n]))}
+  if(pk>0.99){const k=0.99/pk;for(let n=0;n<len;n++){L[n]*=k;R[n]*=k}}
+  return [L,R];
+}
+function wav(chs,sr){
+  const len=chs[0].length, nc=chs.length, bytes=len*nc*2;
+  const b=new ArrayBuffer(44+bytes), v=new DataView(b);
+  const s=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  s(0,'RIFF');v.setUint32(4,36+bytes,true);s(8,'WAVEfmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,nc,true);v.setUint32(24,sr,true);
+  v.setUint32(28,sr*nc*2,true);v.setUint16(32,nc*2,true);v.setUint16(34,16,true);
+  s(36,'data');v.setUint32(40,bytes,true);
+  let o=44;
+  for(let i=0;i<len;i++) for(let c=0;c<nc;c++){ const x=clamp(chs[c][i],-1,1); v.setInt16(o,x<0?x*0x8000:x*0x7fff,true); o+=2 }
+  return new Blob([b],{type:'audio/wav'});
+}
+function dl(blob,name){ const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),5000) }
+$('#expMix').onclick=()=>{ if(!A)return; msg('WAV készítése …'); setTimeout(()=>{ const [L,R]=mixdown(); dl(wav([L,R],A.sr),'ujraepitett-mix.wav'); msg('Mix exportálva.') },20) };
+function exportTrack(T){
+  const len=A.total, d=new Float32Array(len);
+  for(let n=0;n<len;n++) d[n]=clamp(T.data[n]*T.p.gain*envAt(T,n/len)*A.calib,-1,1);
+  dl(wav([d],A.sr),'sav-'+T.name.replace(/[^\w-]+/g,'_')+'.wav');
+  msg('Sáv exportálva: '+T.name);
+}
+drawOverview();
+</script>
+</body>
+</html>
