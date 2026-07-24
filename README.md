@@ -3,7 +3,10 @@
 Hangfájlok spektrális elemzése és **újraépítése hangolható generátorokból**, közvetlenül a böngészőben.
 Egyetlen önálló HTML fájl — nincs build, nincs függőség, nincs szerver. A hang nem hagyja el a gépedet.
 
-👉 [`spektral-studio.html`](spektral-studio.html) — töltsd le és nyisd meg böngészőben.
+## ▶ [Indítsd el itt: sid14925.github.io/spectral-studio](https://sid14925.github.io/spectral-studio/)
+
+Vagy töltsd le az [`index.html`](index.html) fájlt, és nyisd meg helyben — ugyanúgy működik,
+internet nélkül is.
 
 ## Mit csinál
 
@@ -52,7 +55,8 @@ WAV-export a teljes mixről vagy külön sávonként. Stem kinyeréséhez: szól
 
 ## Használat
 
-1. Nyisd meg a `spektral-studio.html` fájlt böngészőben (Chrome / Edge / Firefox).
+1. Nyisd meg a [live verziót](https://sid14925.github.io/spectral-studio/) (Chrome / Edge / Firefox),
+   vagy az `index.html` fájlt helyben.
 2. Nyomj a **Demó hang** gombra, vagy húzz be egy saját hangfájlt.
 3. **Elemzés + újraépítés**, aztán tekerj bele a sávokba.
 
